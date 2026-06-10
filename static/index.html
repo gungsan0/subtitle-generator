@@ -6,20 +6,19 @@
   <title>Subtitle Generator</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body { font-family: 'Inter', system-ui, sans-serif; }
+    body { font-family: system-ui, sans-serif; }
     .chip { transition: all .15s; cursor: pointer; user-select: none; }
-    .chip.on { background: #6366f1; border-color: #6366f1; color: #fff; }
+    .chip.on  { background: #6366f1; border-color: #6366f1; color: #fff; }
     .chip.off { background: transparent; border-color: #374151; color: #9ca3af; }
     .chip.off:hover { border-color: #6b7280; color: #d1d5db; }
     #dropzone.drag-over { border-color: #6366f1; background: #1e1b4b22; }
-    .step-done  { color: #34d399; }
-    .step-active{ color: #a5b4fc; }
-    .step-wait  { color: #4b5563; }
     .bar { transition: width .4s ease; }
+    .tab-active   { background: #1f2937; color: #fff; border-color: #374151; }
+    .tab-inactive { background: transparent; color: #6b7280; border-color: transparent; }
+    .tab-inactive:hover { color: #9ca3af; }
   </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen">
-
 <div class="max-w-3xl mx-auto px-4 py-10">
 
   <!-- Header -->
@@ -28,28 +27,64 @@
     <p class="mt-2 text-gray-400">AI-powered subtitles in any language from any video</p>
   </div>
 
-  <!-- Upload card -->
+  <!-- Source card -->
   <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-5">
-    <h2 class="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-4">1 — Upload Video</h2>
+    <h2 class="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-4">1 — Video Source</h2>
 
-    <div id="dropzone"
-         class="border-2 border-dashed border-gray-700 rounded-xl py-12 text-center cursor-pointer hover:border-gray-500 transition-colors">
-      <div id="dz-idle">
-        <svg class="mx-auto mb-3 text-gray-600" width="44" height="44" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-5 bg-gray-950 rounded-xl p-1 border border-gray-800">
+      <button id="tab-file" onclick="switchTab('file')"
+        class="tab flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all tab-active border">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
         </svg>
-        <p class="text-gray-300">Drop video here or <span class="text-indigo-400 underline">browse</span></p>
-        <p class="text-xs text-gray-500 mt-1">MP4 · MKV · MOV · AVI · WebM</p>
-      </div>
-      <div id="dz-chosen" class="hidden items-center justify-center gap-3">
-        <svg class="text-green-400 shrink-0" width="22" height="22" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+        Upload File
+      </button>
+      <button id="tab-yt" onclick="switchTab('youtube')"
+        class="tab flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all tab-inactive border">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 00.5 6.2 31 31 0 000 12a31 31 0 00.5 5.8 3 3 0 002.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 002.1-2.1A31 31 0 0024 12a31 31 0 00-.5-5.8zM9.75 15.5v-7l6.25 3.5-6.25 3.5z"/>
         </svg>
-        <span id="chosen-name" class="text-gray-200 font-medium truncate max-w-sm"></span>
-        <span class="text-xs text-gray-500 shrink-0">· click to change</span>
+        YouTube / URL
+      </button>
+    </div>
+
+    <!-- File upload panel -->
+    <div id="panel-file">
+      <div id="dropzone"
+           class="border-2 border-dashed border-gray-700 rounded-xl py-10 text-center cursor-pointer hover:border-gray-500 transition-colors">
+        <div id="dz-idle">
+          <svg class="mx-auto mb-3 text-gray-600" width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          </svg>
+          <p class="text-gray-300">Drop video here or <span class="text-indigo-400 underline">browse</span></p>
+          <p class="text-xs text-gray-500 mt-1">MP4 · MKV · MOV · AVI · WebM</p>
+        </div>
+        <div id="dz-chosen" class="hidden items-center justify-center gap-3">
+          <svg class="text-green-400 shrink-0" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          <span id="chosen-name" class="text-gray-200 font-medium truncate max-w-xs"></span>
+          <span class="text-xs text-gray-500 shrink-0">· click to change</span>
+        </div>
+        <input id="file-input" type="file" class="hidden" accept="video/*,.mkv,.avi">
       </div>
-      <input id="file-input" type="file" class="hidden" accept="video/*,.mkv,.avi">
+    </div>
+
+    <!-- YouTube URL panel -->
+    <div id="panel-youtube" class="hidden">
+      <div class="flex gap-2">
+        <input id="yt-url" type="url"
+          placeholder="https://www.youtube.com/watch?v=..."
+          class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500 text-sm"/>
+        <button onclick="pasteUrl()"
+          class="bg-gray-800 hover:bg-gray-700 border border-gray-700 px-4 rounded-xl text-sm text-gray-300 transition-colors whitespace-nowrap">
+          Paste
+        </button>
+      </div>
+      <p class="text-xs text-gray-600 mt-2">Supports YouTube and any site supported by yt-dlp</p>
     </div>
   </div>
 
@@ -92,8 +127,7 @@
 
   <!-- Progress card -->
   <div id="progress-card" class="hidden bg-gray-900 border border-gray-800 rounded-2xl p-6 mt-5">
-    <h2 class="font-semibold mb-4">Processing…</h2>
-
+    <h2 class="font-semibold mb-4" id="progress-title">Processing…</h2>
     <div class="bg-gray-800 rounded-full h-2.5 mb-2 overflow-hidden">
       <div id="prog-bar" class="bar bg-indigo-500 h-full rounded-full" style="width:0%"></div>
     </div>
@@ -101,18 +135,20 @@
       <span id="prog-label">Starting…</span>
       <span id="prog-pct">0%</span>
     </div>
-
     <div class="space-y-2 text-sm" id="steps-list">
-      <div class="step step-wait flex items-center gap-2" data-s="extracting_audio">
+      <div class="step flex items-center gap-2 text-gray-500" data-s="downloading" id="step-downloading">
+        <span class="icon">○</span><span>Download from YouTube</span>
+      </div>
+      <div class="step flex items-center gap-2 text-gray-500" data-s="extracting_audio">
         <span class="icon">○</span><span>Extract audio</span>
       </div>
-      <div class="step step-wait flex items-center gap-2" data-s="loading_model">
+      <div class="step flex items-center gap-2 text-gray-500" data-s="loading_model">
         <span class="icon">○</span><span>Load AI model</span>
       </div>
-      <div class="step step-wait flex items-center gap-2" data-s="transcribing">
+      <div class="step flex items-center gap-2 text-gray-500" data-s="transcribing">
         <span class="icon">○</span><span>Transcribe audio</span>
       </div>
-      <div class="step step-wait flex items-center gap-2" data-s="translating">
+      <div class="step flex items-center gap-2 text-gray-500" data-s="translating">
         <span class="icon">○</span><span>Translate subtitles</span>
       </div>
     </div>
@@ -141,19 +177,21 @@
   </div>
 
 </div>
-
 <script>
 // ── state ──────────────────────────────────────────────────────────────
 let file = null;
+let inputMode = 'file';
 let selected = new Set(['English', 'Korean']);
 let jobId = null;
 let poll = null;
+let isYoutube = false;
 
-const STATUS_ORDER = ['extracting_audio', 'loading_model', 'transcribing', 'translating'];
+const STATUS_ORDER = ['downloading', 'extracting_audio', 'loading_model', 'transcribing', 'translating'];
 const STATUS_LABEL = {
   queued:           'Waiting…',
+  downloading:      'Downloading video…',
   extracting_audio: 'Extracting audio from video…',
-  loading_model:    'Loading AI model (may download first time)…',
+  loading_model:    'Loading AI model (may download on first use)…',
   transcribing:     'Transcribing audio — this takes a while…',
   saving:           'Saving transcription…',
   translating:      'Translating subtitles…',
@@ -161,17 +199,38 @@ const STATUS_LABEL = {
 };
 
 // ── boot ───────────────────────────────────────────────────────────────
-fetch('/api/languages')
-  .then(r => r.json())
-  .then(({ languages }) => {
-    const src = document.getElementById('source-lang');
-    languages.forEach(l => {
-      const o = document.createElement('option');
-      o.value = o.textContent = l;
-      src.appendChild(o);
-    });
-    renderChips(languages);
+fetch('/api/languages').then(r => r.json()).then(({ languages }) => {
+  const src = document.getElementById('source-lang');
+  languages.forEach(l => {
+    const o = document.createElement('option');
+    o.value = o.textContent = l;
+    src.appendChild(o);
   });
+  renderChips(languages);
+});
+
+// ── tabs ───────────────────────────────────────────────────────────────
+function switchTab(mode) {
+  inputMode = mode;
+  const isYT = mode === 'youtube';
+  document.getElementById('tab-file').className =
+    'tab flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all border ' +
+    (isYT ? 'tab-inactive' : 'tab-active');
+  document.getElementById('tab-yt').className =
+    'tab flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all border ' +
+    (isYT ? 'tab-active' : 'tab-inactive');
+  document.getElementById('panel-file').classList.toggle('hidden', isYT);
+  document.getElementById('panel-youtube').classList.toggle('hidden', !isYT);
+}
+
+async function pasteUrl() {
+  try {
+    const text = await navigator.clipboard.readText();
+    document.getElementById('yt-url').value = text;
+  } catch {
+    document.getElementById('yt-url').focus();
+  }
+}
 
 // ── chips ──────────────────────────────────────────────────────────────
 function renderChips(langs) {
@@ -182,11 +241,8 @@ function renderChips(langs) {
     b.className = `chip text-sm px-3 py-1 rounded-full border ${selected.has(l) ? 'on' : 'off'}`;
     b.textContent = l;
     b.onclick = () => {
-      if (selected.has(l)) {
-        if (selected.size > 1) selected.delete(l);
-      } else {
-        selected.add(l);
-      }
+      if (selected.has(l)) { if (selected.size > 1) selected.delete(l); }
+      else selected.add(l);
       b.className = `chip text-sm px-3 py-1 rounded-full border ${selected.has(l) ? 'on' : 'off'}`;
     };
     c.appendChild(b);
@@ -196,45 +252,60 @@ function renderChips(langs) {
 // ── drag & drop ────────────────────────────────────────────────────────
 const dz = document.getElementById('dropzone');
 const fi = document.getElementById('file-input');
-
 dz.addEventListener('click', () => fi.click());
 fi.addEventListener('change', e => setFile(e.target.files[0]));
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
 dz.addEventListener('drop', e => {
-  e.preventDefault();
-  dz.classList.remove('drag-over');
+  e.preventDefault(); dz.classList.remove('drag-over');
   if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
 });
 
 function setFile(f) {
   file = f;
   document.getElementById('dz-idle').classList.add('hidden');
-  const chosen = document.getElementById('dz-chosen');
-  chosen.classList.remove('hidden');
-  chosen.classList.add('flex');
+  const c = document.getElementById('dz-chosen');
+  c.classList.remove('hidden'); c.classList.add('flex');
   document.getElementById('chosen-name').textContent = f.name;
 }
 
 // ── generate ───────────────────────────────────────────────────────────
 document.getElementById('gen-btn').addEventListener('click', async () => {
-  if (!file) { alert('Please select a video file first.'); return; }
-  if (selected.size === 0) { alert('Select at least one target language.'); return; }
+  const sourceLang = document.getElementById('source-lang').value;
+  const modelSize  = document.getElementById('model-size').value;
+  const targetLangs = [...selected].join(',');
 
-  setGenBtn(false, 'Uploading…');
   hideAll();
-
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('source_language', document.getElementById('source-lang').value);
-  fd.append('target_languages', [...selected].join(','));
-  fd.append('model_size', document.getElementById('model-size').value);
+  setGenBtn(false, 'Uploading…');
 
   try {
-    const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    let res, endpoint;
+    const fd = new FormData();
+    fd.append('source_language', sourceLang);
+    fd.append('target_languages', targetLangs);
+    fd.append('model_size', modelSize);
+
+    if (inputMode === 'youtube') {
+      const url = document.getElementById('yt-url').value.trim();
+      if (!url) { alert('Please enter a video URL.'); setGenBtn(true, 'Generate Subtitles'); return; }
+      fd.append('youtube_url', url);
+      endpoint = '/api/transcribe-url';
+      isYoutube = true;
+    } else {
+      if (!file) { alert('Please select a video file first.'); setGenBtn(true, 'Generate Subtitles'); return; }
+      fd.append('file', file);
+      endpoint = '/api/transcribe';
+      isYoutube = false;
+    }
+
+    setGenBtn(false, inputMode === 'youtube' ? 'Starting download…' : 'Uploading…');
+    res = await fetch(endpoint, { method: 'POST', body: fd });
     if (!res.ok) throw new Error(await res.text());
     const { job_id } = await res.json();
     jobId = job_id;
+
+    // Show/hide the download step based on source
+    document.getElementById('step-downloading').classList.toggle('hidden', !isYoutube);
     showCard('progress-card');
     poll = setInterval(checkStatus, 2500);
   } catch (err) {
@@ -260,28 +331,23 @@ function updateProgress(data) {
   const pct = data.progress || 0;
   document.getElementById('prog-bar').style.width = pct + '%';
   document.getElementById('prog-pct').textContent = pct + '%';
-
   let label = STATUS_LABEL[data.status] || data.status;
   if (data.status === 'translating' && data.translating_to)
     label = `Translating → ${data.translating_to}…`;
   document.getElementById('prog-label').textContent = label;
 
   const currentIdx = STATUS_ORDER.indexOf(data.status);
-  document.querySelectorAll('.step').forEach((el, i) => {
+  document.querySelectorAll('.step').forEach(el => {
+    if (el.classList.contains('hidden')) return;
     const s = el.dataset.s;
     const idx = STATUS_ORDER.indexOf(s);
-    el.className = 'step flex items-center gap-2 text-sm ';
     const icon = el.querySelector('.icon');
     if (data.status === 'completed' || idx < currentIdx) {
-      el.classList.add('step-done'); icon.textContent = '✓';
-    } else if (
-      s === data.status ||
-      (data.status === 'saving' && s === 'transcribing') ||
-      (data.status === 'translating' && s === 'translating')
-    ) {
-      el.classList.add('step-active'); icon.textContent = '▶';
+      el.className = 'step flex items-center gap-2 text-sm text-green-400'; icon.textContent = '✓';
+    } else if (s === data.status || (data.status === 'saving' && s === 'transcribing')) {
+      el.className = 'step flex items-center gap-2 text-sm text-indigo-300'; icon.textContent = '▶';
     } else {
-      el.classList.add('step-wait'); icon.textContent = '○';
+      el.className = 'step flex items-center gap-2 text-sm text-gray-500'; icon.textContent = '○';
     }
   });
 }
@@ -296,17 +362,14 @@ function showResults(data) {
 
   const container = document.getElementById('dl-buttons');
   container.innerHTML = '';
-
-  const langLabel = {
-    original: 'Original Transcription',
-    ...Object.fromEntries([...selected].map(l => [l, `${l} Subtitles`]))
-  };
+  const langLabel = { original: 'Original Transcription' };
+  [...selected].forEach(l => { langLabel[l] = `${l} Subtitles`; });
 
   ['original', ...[...selected]].forEach(key => {
     const a = document.createElement('a');
     a.href = `/api/download/${jobId}/${encodeURIComponent(key)}`;
     a.download = '';
-    a.className = 'flex items-center gap-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-xl px-4 py-3 transition-colors group';
+    a.className = 'flex items-center gap-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl px-4 py-3 transition-colors group';
     a.innerHTML = `
       <svg class="text-indigo-400 shrink-0 group-hover:text-indigo-300" width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
@@ -317,34 +380,31 @@ function showResults(data) {
   });
 }
 
-// ── error ──────────────────────────────────────────────────────────────
 function showError(msg) {
   hideAll();
   showCard('error-card');
   document.getElementById('error-text').textContent = msg;
 }
 
-// ── reset ──────────────────────────────────────────────────────────────
 function reset() {
-  file = null; jobId = null;
+  file = null; jobId = null; isYoutube = false;
   clearInterval(poll);
   document.getElementById('dz-idle').classList.remove('hidden');
   const c = document.getElementById('dz-chosen');
   c.classList.add('hidden'); c.classList.remove('flex');
   document.getElementById('file-input').value = '';
+  document.getElementById('yt-url').value = '';
+  document.getElementById('prog-bar').style.width = '0%';
   setGenBtn(true, 'Generate Subtitles');
   hideAll();
-  document.getElementById('prog-bar').style.width = '0%';
 }
 
 document.getElementById('new-btn').addEventListener('click', reset);
 document.getElementById('retry-btn').addEventListener('click', reset);
 
-// ── helpers ────────────────────────────────────────────────────────────
 function setGenBtn(enabled, text) {
   const b = document.getElementById('gen-btn');
-  b.disabled = !enabled;
-  b.textContent = text;
+  b.disabled = !enabled; b.textContent = text;
 }
 function showCard(id) { document.getElementById(id).classList.remove('hidden'); }
 function hideAll() {

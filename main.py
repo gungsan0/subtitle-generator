@@ -137,88 +137,147 @@ def job_update(job_id: str, **kwargs):
     jobs[job_id].update(kwargs)
 
 
+def _extract_audio(input_path: str, output_dir: str) -> str:
+    """Convert any video/audio file to 16kHz mono WAV. Returns wav path."""
+    audio_path = os.path.join(output_dir, "audio.wav")
+    proc = subprocess.run(
+        ["ffmpeg", "-i", input_path, "-vn", "-acodec", "pcm_s16le",
+         "-ar", "16000", "-ac", "1", audio_path, "-y"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"Audio extraction failed:\n{proc.stderr[-800:]}")
+    audio_size = os.path.getsize(audio_path)
+    logger.info(f"Audio extracted: {audio_size:,} bytes")
+    if audio_size < 4096:
+        raise RuntimeError(
+            f"Audio file too small ({audio_size} bytes). "
+            "The video may have no audio track, or the codec is unsupported."
+        )
+    return audio_path
+
+
+def _transcribe_and_translate(job_id: str, audio_path: str, output_dir: str,
+                               source_lang: str, target_langs: list,
+                               model_size: str, progress_base: int = 15):
+    """Shared transcription + translation pipeline."""
+    job_update(job_id, status="loading_model", progress=progress_base)
+    model = get_model(model_size)
+
+    job_update(job_id, status="transcribing", progress=progress_base + 12)
+    whisper_lang = WHISPER_LANGUAGES.get(source_lang)
+    kwargs = {"language": whisper_lang} if whisper_lang else {}
+    result = model.transcribe(audio_path, fp16=False, **kwargs)
+
+    detected_lang = result.get("language", "unknown")
+    segments = result.get("segments", [])
+    logger.info(f"Transcription: {len(segments)} segments, language={detected_lang}")
+
+    if not segments or not any(s["text"].strip() for s in segments):
+        raise RuntimeError(
+            f"No speech detected (Whisper detected language: '{detected_lang}'). "
+            "Try selecting the source language manually, or use a larger model."
+        )
+
+    original_srt = segments_to_srt(segments)
+    job_update(job_id, status="saving", progress=65, detected_language=detected_lang)
+
+    orig_path = os.path.join(output_dir, "original.srt")
+    with open(orig_path, "w", encoding="utf-8") as f:
+        f.write(original_srt)
+
+    output_files = {"original": orig_path}
+
+    for idx, lang_name in enumerate(target_langs):
+        lang_code = LANGUAGES.get(lang_name, lang_name)
+        progress = 65 + int((idx + 1) / max(len(target_langs), 1) * 32)
+        job_update(job_id, status="translating", progress=progress, translating_to=lang_name)
+
+        try:
+            translated = translate_srt(original_srt, lang_code)
+        except Exception as e:
+            logger.error(f"Translation to {lang_name} failed: {e}")
+            translated = original_srt
+
+        t_path = os.path.join(output_dir, f"{lang_code}.srt")
+        with open(t_path, "w", encoding="utf-8") as f:
+            f.write(translated)
+        output_files[lang_name] = t_path
+
+    job_files[job_id] = output_files
+    job_update(job_id, status="completed", progress=100, detected_language=detected_lang)
+
+    try:
+        os.unlink(audio_path)
+    except OSError:
+        pass
+
+
 def process_job(job_id: str, video_path: str, output_dir: str,
                 source_lang: str, target_langs: list, model_size: str):
     try:
         job_update(job_id, status="extracting_audio", progress=5)
-
-        audio_path = os.path.join(output_dir, "audio.wav")
-        proc = subprocess.run(
-            ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
-             "-ar", "16000", "-ac", "1", audio_path, "-y"],
-            capture_output=True, text=True,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"Audio extraction failed:\n{proc.stderr[-800:]}")
-
-        audio_size = os.path.getsize(audio_path)
-        logger.info(f"Audio extracted: {audio_size:,} bytes")
-        if audio_size < 4096:
-            raise RuntimeError(
-                f"Audio file is too small ({audio_size} bytes). "
-                "The video may have no audio track, or the audio codec is unsupported."
-            )
-
-        job_update(job_id, status="loading_model", progress=15)
-        model = get_model(model_size)
-
-        job_update(job_id, status="transcribing", progress=25)
-        whisper_lang = WHISPER_LANGUAGES.get(source_lang)
-        kwargs = {"language": whisper_lang} if whisper_lang else {}
-        # fp16=False is required on CPU/Apple Silicon — without it Whisper may return empty results
-        result = model.transcribe(audio_path, fp16=False, **kwargs)
-
-        detected_lang = result.get("language", "unknown")
-        segments = result.get("segments", [])
-        logger.info(f"Transcription: {len(segments)} segments, detected language={detected_lang}")
-
-        if not segments or not any(s["text"].strip() for s in segments):
-            raise RuntimeError(
-                f"No speech detected (Whisper detected language: '{detected_lang}'). "
-                "Suggestions: select the source language manually, or try a larger model."
-            )
-
-        original_srt = segments_to_srt(segments)
-        job_update(job_id, status="saving", progress=65, detected_language=detected_lang)
-
-        orig_path = os.path.join(output_dir, "original.srt")
-        with open(orig_path, "w", encoding="utf-8") as f:
-            f.write(original_srt)
-
-        output_files = {"original": orig_path}
-
-        for idx, lang_name in enumerate(target_langs):
-            lang_code = LANGUAGES.get(lang_name, lang_name)
-            progress = 65 + int((idx + 1) / max(len(target_langs), 1) * 32)
-            job_update(job_id, status="translating", progress=progress, translating_to=lang_name)
-
-            try:
-                translated = translate_srt(original_srt, lang_code)
-            except Exception as e:
-                logger.error(f"Translation to {lang_name} failed: {e}")
-                translated = original_srt
-
-            t_path = os.path.join(output_dir, f"{lang_code}.srt")
-            with open(t_path, "w", encoding="utf-8") as f:
-                f.write(translated)
-            output_files[lang_name] = t_path
-
-        job_files[job_id] = output_files
-        job_update(job_id, status="completed", progress=100, detected_language=detected_lang)
-
-        for p in [video_path, audio_path]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-
-    except Exception as e:
-        logger.error(f"Job {job_id} error: {e}")
-        job_update(job_id, status="error", error=str(e))
+        audio_path = _extract_audio(video_path, output_dir)
         try:
             os.unlink(video_path)
         except OSError:
             pass
+        _transcribe_and_translate(job_id, audio_path, output_dir,
+                                   source_lang, target_langs, model_size,
+                                   progress_base=15)
+    except Exception as e:
+        logger.error(f"Job {job_id} error: {e}")
+        job_update(job_id, status="error", error=str(e))
+
+
+def process_youtube_job(job_id: str, url: str, output_dir: str,
+                         source_lang: str, target_langs: list, model_size: str):
+    try:
+        job_update(job_id, status="downloading", progress=5)
+
+        # Fetch title first (quick call)
+        title_proc = subprocess.run(
+            ["yt-dlp", "--print", "title", "--no-playlist", url],
+            capture_output=True, text=True, timeout=30,
+        )
+        title = title_proc.stdout.strip().split("\n")[0] if title_proc.stdout.strip() else url
+        jobs[job_id]["filename"] = title
+        logger.info(f"YouTube title: {title}")
+
+        job_update(job_id, status="downloading", progress=10)
+
+        # Download best audio track
+        output_template = os.path.join(output_dir, "yt_audio.%(ext)s")
+        dl_proc = subprocess.run(
+            ["yt-dlp", "-f", "bestaudio/best", "-o", output_template,
+             "--no-playlist", "--no-progress", "--no-warnings", url],
+            capture_output=True, text=True, timeout=600,
+        )
+        if dl_proc.returncode != 0:
+            raise RuntimeError(f"YouTube download failed:\n{dl_proc.stderr[-600:]}")
+
+        downloaded = sorted(
+            f for f in os.listdir(output_dir) if f.startswith("yt_audio.")
+        )
+        if not downloaded:
+            raise RuntimeError("Download appeared to succeed but no audio file was found.")
+
+        yt_path = os.path.join(output_dir, downloaded[0])
+        logger.info(f"Downloaded: {yt_path} ({os.path.getsize(yt_path):,} bytes)")
+
+        job_update(job_id, status="extracting_audio", progress=35)
+        audio_path = _extract_audio(yt_path, output_dir)
+        try:
+            os.unlink(yt_path)
+        except OSError:
+            pass
+
+        _transcribe_and_translate(job_id, audio_path, output_dir,
+                                   source_lang, target_langs, model_size,
+                                   progress_base=42)
+    except Exception as e:
+        logger.error(f"YouTube job {job_id} error: {e}")
+        job_update(job_id, status="error", error=str(e))
 
 
 @app.get("/")
@@ -258,14 +317,45 @@ async def start_transcription(
         "progress": 0,
         "filename": file.filename or "video",
         "target_languages": target_langs,
+        "source": "file",
     }
 
-    t = threading.Thread(
+    threading.Thread(
         target=process_job,
         args=(job_id, video_path, output_dir, source_language, target_langs, model_size),
         daemon=True,
-    )
-    t.start()
+    ).start()
+    return {"job_id": job_id}
+
+
+@app.post("/api/transcribe-url")
+async def transcribe_from_url(
+    youtube_url: str = Form(...),
+    source_language: str = Form("Auto-detect"),
+    target_languages: str = Form("English,Korean"),
+    model_size: str = Form("medium"),
+):
+    target_langs = [
+        l.strip() for l in target_languages.split(",")
+        if l.strip() and l.strip() in LANGUAGES
+    ]
+
+    output_dir = tempfile.mkdtemp(prefix="subtitle_yt_")
+    job_id = str(uuid.uuid4())
+
+    jobs[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "filename": youtube_url,
+        "target_languages": target_langs,
+        "source": "youtube",
+    }
+
+    threading.Thread(
+        target=process_youtube_job,
+        args=(job_id, youtube_url, output_dir, source_language, target_langs, model_size),
+        daemon=True,
+    ).start()
     return {"job_id": job_id}
 
 
@@ -292,5 +382,4 @@ async def download_subtitle(job_id: str, lang_key: str):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8766))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8766)

@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+openai-whisper
+deep-translator
+python-multipart

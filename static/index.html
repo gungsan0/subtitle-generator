@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subtitle Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .chip { transition: all .15s; cursor: pointer; user-select: none; }
+    .chip.on { background: #6366f1; border-color: #6366f1; color: #fff; }
+    .chip.off { background: transparent; border-color: #374151; color: #9ca3af; }
+    .chip.off:hover { border-color: #6b7280; color: #d1d5db; }
+    #dropzone.drag-over { border-color: #6366f1; background: #1e1b4b22; }
+    .step-done  { color: #34d399; }
+    .step-active{ color: #a5b4fc; }
+    .step-wait  { color: #4b5563; }
+    .bar { transition: width .4s ease; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+<div class="max-w-3xl mx-auto px-4 py-10">
+
+  <!-- Header -->
+  <div class="mb-10 text-center">
+    <h1 class="text-4xl font-bold tracking-tight">Subtitle Generator</h1>
+    <p class="mt-2 text-gray-400">AI-powered subtitles in any language from any video</p>
+  </div>
+
+  <!-- Upload card -->
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-5">
+    <h2 class="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-4">1 — Upload Video</h2>
+
+    <div id="dropzone"
+         class="border-2 border-dashed border-gray-700 rounded-xl py-12 text-center cursor-pointer hover:border-gray-500 transition-colors">
+      <div id="dz-idle">
+        <svg class="mx-auto mb-3 text-gray-600" width="44" height="44" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+        <p class="text-gray-300">Drop video here or <span class="text-indigo-400 underline">browse</span></p>
+        <p class="text-xs text-gray-500 mt-1">MP4 · MKV · MOV · AVI · WebM</p>
+      </div>
+      <div id="dz-chosen" class="hidden items-center justify-center gap-3">
+        <svg class="text-green-400 shrink-0" width="22" height="22" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+        </svg>
+        <span id="chosen-name" class="text-gray-200 font-medium truncate max-w-sm"></span>
+        <span class="text-xs text-gray-500 shrink-0">· click to change</span>
+      </div>
+      <input id="file-input" type="file" class="hidden" accept="video/*,.mkv,.avi">
+    </div>
+  </div>
+
+  <!-- Settings card -->
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-5">
+    <h2 class="font-semibold text-sm text-gray-400 uppercase tracking-wider mb-5">2 — Settings</h2>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
+      <div>
+        <label class="block text-sm text-gray-400 mb-1.5">Audio Language</label>
+        <select id="source-lang" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-200 focus:outline-none focus:border-indigo-500 text-sm">
+          <option value="Auto-detect">Auto-detect</option>
+        </select>
+        <p class="text-xs text-gray-600 mt-1">Leave auto for most videos</p>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1.5">AI Model</label>
+        <select id="model-size" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-200 focus:outline-none focus:border-indigo-500 text-sm">
+          <option value="tiny">Tiny — fastest, basic accuracy</option>
+          <option value="base">Base — fast</option>
+          <option value="small">Small — balanced</option>
+          <option value="medium" selected>Medium — recommended ✓</option>
+          <option value="large">Large — best accuracy, slowest</option>
+        </select>
+        <p class="text-xs text-gray-600 mt-1">Downloaded on first use</p>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm text-gray-400 mb-3">Target Languages <span class="text-gray-600">(click to toggle)</span></label>
+      <div id="lang-chips" class="flex flex-wrap gap-2"></div>
+    </div>
+  </div>
+
+  <!-- Generate button -->
+  <button id="gen-btn"
+    class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed font-semibold py-3.5 rounded-xl text-base transition-colors">
+    Generate Subtitles
+  </button>
+
+  <!-- Progress card -->
+  <div id="progress-card" class="hidden bg-gray-900 border border-gray-800 rounded-2xl p-6 mt-5">
+    <h2 class="font-semibold mb-4">Processing…</h2>
+
+    <div class="bg-gray-800 rounded-full h-2.5 mb-2 overflow-hidden">
+      <div id="prog-bar" class="bar bg-indigo-500 h-full rounded-full" style="width:0%"></div>
+    </div>
+    <div class="flex justify-between text-xs text-gray-500 mb-5">
+      <span id="prog-label">Starting…</span>
+      <span id="prog-pct">0%</span>
+    </div>
+
+    <div class="space-y-2 text-sm" id="steps-list">
+      <div class="step step-wait flex items-center gap-2" data-s="extracting_audio">
+        <span class="icon">○</span><span>Extract audio</span>
+      </div>
+      <div class="step step-wait flex items-center gap-2" data-s="loading_model">
+        <span class="icon">○</span><span>Load AI model</span>
+      </div>
+      <div class="step step-wait flex items-center gap-2" data-s="transcribing">
+        <span class="icon">○</span><span>Transcribe audio</span>
+      </div>
+      <div class="step step-wait flex items-center gap-2" data-s="translating">
+        <span class="icon">○</span><span>Translate subtitles</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results card -->
+  <div id="results-card" class="hidden bg-gray-900 border border-green-900 rounded-2xl p-6 mt-5">
+    <div class="flex items-center gap-2 mb-1">
+      <svg class="text-green-400" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+      </svg>
+      <h2 class="font-semibold text-green-400">Done! Download your subtitles</h2>
+    </div>
+    <p id="detected-lang" class="text-xs text-gray-500 mb-5"></p>
+    <div id="dl-buttons" class="space-y-2"></div>
+    <button id="new-btn" class="mt-5 text-sm text-indigo-400 hover:text-indigo-300 underline">
+      Process another video →
+    </button>
+  </div>
+
+  <!-- Error card -->
+  <div id="error-card" class="hidden bg-gray-900 border border-red-900 rounded-2xl p-6 mt-5">
+    <h2 class="font-semibold text-red-400 mb-2">Error</h2>
+    <pre id="error-text" class="text-sm text-gray-400 whitespace-pre-wrap break-words"></pre>
+    <button id="retry-btn" class="mt-4 text-sm text-indigo-400 hover:text-indigo-300 underline">Try again →</button>
+  </div>
+
+</div>
+
+<script>
+// ── state ──────────────────────────────────────────────────────────────
+let file = null;
+let selected = new Set(['English', 'Korean']);
+let jobId = null;
+let poll = null;
+
+const STATUS_ORDER = ['extracting_audio', 'loading_model', 'transcribing', 'translating'];
+const STATUS_LABEL = {
+  queued:           'Waiting…',
+  extracting_audio: 'Extracting audio from video…',
+  loading_model:    'Loading AI model (may download first time)…',
+  transcribing:     'Transcribing audio — this takes a while…',
+  saving:           'Saving transcription…',
+  translating:      'Translating subtitles…',
+  completed:        'Done!',
+};
+
+// ── boot ───────────────────────────────────────────────────────────────
+fetch('/api/languages')
+  .then(r => r.json())
+  .then(({ languages }) => {
+    const src = document.getElementById('source-lang');
+    languages.forEach(l => {
+      const o = document.createElement('option');
+      o.value = o.textContent = l;
+      src.appendChild(o);
+    });
+    renderChips(languages);
+  });
+
+// ── chips ──────────────────────────────────────────────────────────────
+function renderChips(langs) {
+  const c = document.getElementById('lang-chips');
+  c.innerHTML = '';
+  langs.forEach(l => {
+    const b = document.createElement('button');
+    b.className = `chip text-sm px-3 py-1 rounded-full border ${selected.has(l) ? 'on' : 'off'}`;
+    b.textContent = l;
+    b.onclick = () => {
+      if (selected.has(l)) {
+        if (selected.size > 1) selected.delete(l);
+      } else {
+        selected.add(l);
+      }
+      b.className = `chip text-sm px-3 py-1 rounded-full border ${selected.has(l) ? 'on' : 'off'}`;
+    };
+    c.appendChild(b);
+  });
+}
+
+// ── drag & drop ────────────────────────────────────────────────────────
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('file-input');
+
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', e => setFile(e.target.files[0]));
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+
+function setFile(f) {
+  file = f;
+  document.getElementById('dz-idle').classList.add('hidden');
+  const chosen = document.getElementById('dz-chosen');
+  chosen.classList.remove('hidden');
+  chosen.classList.add('flex');
+  document.getElementById('chosen-name').textContent = f.name;
+}
+
+// ── generate ───────────────────────────────────────────────────────────
+document.getElementById('gen-btn').addEventListener('click', async () => {
+  if (!file) { alert('Please select a video file first.'); return; }
+  if (selected.size === 0) { alert('Select at least one target language.'); return; }
+
+  setGenBtn(false, 'Uploading…');
+  hideAll();
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('source_language', document.getElementById('source-lang').value);
+  fd.append('target_languages', [...selected].join(','));
+  fd.append('model_size', document.getElementById('model-size').value);
+
+  try {
+    const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(await res.text());
+    const { job_id } = await res.json();
+    jobId = job_id;
+    showCard('progress-card');
+    poll = setInterval(checkStatus, 2500);
+  } catch (err) {
+    showError(err.message);
+    setGenBtn(true, 'Generate Subtitles');
+  }
+});
+
+// ── polling ────────────────────────────────────────────────────────────
+async function checkStatus() {
+  if (!jobId) return;
+  try {
+    const res = await fetch(`/api/status/${jobId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    updateProgress(data);
+    if (data.status === 'completed') { clearInterval(poll); showResults(data); }
+    else if (data.status === 'error') { clearInterval(poll); showError(data.error || 'Unknown error'); setGenBtn(true, 'Generate Subtitles'); }
+  } catch (_) {}
+}
+
+function updateProgress(data) {
+  const pct = data.progress || 0;
+  document.getElementById('prog-bar').style.width = pct + '%';
+  document.getElementById('prog-pct').textContent = pct + '%';
+
+  let label = STATUS_LABEL[data.status] || data.status;
+  if (data.status === 'translating' && data.translating_to)
+    label = `Translating → ${data.translating_to}…`;
+  document.getElementById('prog-label').textContent = label;
+
+  const currentIdx = STATUS_ORDER.indexOf(data.status);
+  document.querySelectorAll('.step').forEach((el, i) => {
+    const s = el.dataset.s;
+    const idx = STATUS_ORDER.indexOf(s);
+    el.className = 'step flex items-center gap-2 text-sm ';
+    const icon = el.querySelector('.icon');
+    if (data.status === 'completed' || idx < currentIdx) {
+      el.classList.add('step-done'); icon.textContent = '✓';
+    } else if (
+      s === data.status ||
+      (data.status === 'saving' && s === 'transcribing') ||
+      (data.status === 'translating' && s === 'translating')
+    ) {
+      el.classList.add('step-active'); icon.textContent = '▶';
+    } else {
+      el.classList.add('step-wait'); icon.textContent = '○';
+    }
+  });
+}
+
+// ── results ────────────────────────────────────────────────────────────
+function showResults(data) {
+  hideAll();
+  showCard('results-card');
+  if (data.detected_language)
+    document.getElementById('detected-lang').textContent =
+      `Detected audio language: ${data.detected_language}`;
+
+  const container = document.getElementById('dl-buttons');
+  container.innerHTML = '';
+
+  const langLabel = {
+    original: 'Original Transcription',
+    ...Object.fromEntries([...selected].map(l => [l, `${l} Subtitles`]))
+  };
+
+  ['original', ...[...selected]].forEach(key => {
+    const a = document.createElement('a');
+    a.href = `/api/download/${jobId}/${encodeURIComponent(key)}`;
+    a.download = '';
+    a.className = 'flex items-center gap-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-xl px-4 py-3 transition-colors group';
+    a.innerHTML = `
+      <svg class="text-indigo-400 shrink-0 group-hover:text-indigo-300" width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+      </svg>
+      <span class="font-medium text-sm">${langLabel[key] || key}</span>
+      <span class="ml-auto text-xs text-gray-500">.srt</span>`;
+    container.appendChild(a);
+  });
+}
+
+// ── error ──────────────────────────────────────────────────────────────
+function showError(msg) {
+  hideAll();
+  showCard('error-card');
+  document.getElementById('error-text').textContent = msg;
+}
+
+// ── reset ──────────────────────────────────────────────────────────────
+function reset() {
+  file = null; jobId = null;
+  clearInterval(poll);
+  document.getElementById('dz-idle').classList.remove('hidden');
+  const c = document.getElementById('dz-chosen');
+  c.classList.add('hidden'); c.classList.remove('flex');
+  document.getElementById('file-input').value = '';
+  setGenBtn(true, 'Generate Subtitles');
+  hideAll();
+  document.getElementById('prog-bar').style.width = '0%';
+}
+
+document.getElementById('new-btn').addEventListener('click', reset);
+document.getElementById('retry-btn').addEventListener('click', reset);
+
+// ── helpers ────────────────────────────────────────────────────────────
+function setGenBtn(enabled, text) {
+  const b = document.getElementById('gen-btn');
+  b.disabled = !enabled;
+  b.textContent = text;
+}
+function showCard(id) { document.getElementById(id).classList.remove('hidden'); }
+function hideAll() {
+  ['progress-card','results-card','error-card'].forEach(id =>
+    document.getElementById(id).classList.add('hidden'));
+}
+</script>
+</body>
+</html>

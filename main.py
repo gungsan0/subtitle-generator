@@ -155,7 +155,8 @@ def cleanup_after_download(job_id: str, lang_key: str, file_path: str):
     if job_id not in job_files:
         return
     job_files[job_id].pop(lang_key, None)
-    remaining = [k for k in job_files[job_id] if not k.startswith("_")]
+    # _video counts as remaining — don't wipe the dir until video is also downloaded
+    remaining = [k for k in job_files[job_id] if k != "_dir"]
     if not remaining:
         output_dir = job_files[job_id].get("_dir")
         if output_dir:
@@ -263,7 +264,7 @@ def process_youtube_job(job_id: str, url: str, output_dir: str,
     try:
         job_update(job_id, status="downloading", progress=5)
 
-        # Fetch title first (quick call)
+        # Fetch title
         title_proc = subprocess.run(
             ["yt-dlp", "--print", "title", "--no-playlist", url],
             capture_output=True, text=True, timeout=30,
@@ -274,24 +275,42 @@ def process_youtube_job(job_id: str, url: str, output_dir: str,
 
         job_update(job_id, status="downloading", progress=10)
 
-        # Download best audio track
-        output_template = os.path.join(output_dir, "yt_audio.%(ext)s")
+        video_path = os.path.join(output_dir, "video.mp4")
+        video_err = [None]
+
+        def _dl_video():
+            proc = subprocess.run(
+                ["yt-dlp",
+                 "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+                 "--merge-output-format", "mp4",
+                 "-o", video_path,
+                 "--no-playlist", "--no-progress", "--no-warnings", url],
+                capture_output=True, text=True, timeout=7200,
+            )
+            if proc.returncode != 0:
+                video_err[0] = proc.stderr[-400:]
+                logger.warning(f"Video download failed for {job_id}: {video_err[0]}")
+
+        # Start full video download in background so it runs in parallel with transcription
+        video_thread = threading.Thread(target=_dl_video, daemon=True)
+        video_thread.start()
+
+        # Download audio track for Whisper
+        audio_template = os.path.join(output_dir, "yt_audio.%(ext)s")
         dl_proc = subprocess.run(
-            ["yt-dlp", "-f", "bestaudio/best", "-o", output_template,
+            ["yt-dlp", "-f", "bestaudio/best", "-o", audio_template,
              "--no-playlist", "--no-progress", "--no-warnings", url],
             capture_output=True, text=True, timeout=600,
         )
         if dl_proc.returncode != 0:
-            raise RuntimeError(f"YouTube download failed:\n{dl_proc.stderr[-600:]}")
+            raise RuntimeError(f"YouTube audio download failed:\n{dl_proc.stderr[-600:]}")
 
-        downloaded = sorted(
-            f for f in os.listdir(output_dir) if f.startswith("yt_audio.")
-        )
+        downloaded = sorted(f for f in os.listdir(output_dir) if f.startswith("yt_audio."))
         if not downloaded:
-            raise RuntimeError("Download appeared to succeed but no audio file was found.")
+            raise RuntimeError("Audio file not found after download.")
 
         yt_path = os.path.join(output_dir, downloaded[0])
-        logger.info(f"Downloaded: {yt_path} ({os.path.getsize(yt_path):,} bytes)")
+        logger.info(f"Audio downloaded: {yt_path} ({os.path.getsize(yt_path):,} bytes)")
 
         job_update(job_id, status="extracting_audio", progress=35)
         audio_path = _extract_audio(yt_path, output_dir)
@@ -300,9 +319,20 @@ def process_youtube_job(job_id: str, url: str, output_dir: str,
         except OSError:
             pass
 
+        # Transcribe + translate (video download continues in background)
         _transcribe_and_translate(job_id, audio_path, output_dir,
                                    source_lang, target_langs, model_size,
                                    progress_base=42)
+
+        # Wait for video download to finish (subtitles are already done)
+        video_thread.join(timeout=7200)
+
+        if not video_err[0] and os.path.exists(video_path):
+            job_files[job_id]["_video"] = video_path
+            job_update(job_id, video_ready=True)
+        else:
+            job_update(job_id, video_ready=False)
+
     except Exception as e:
         logger.error(f"YouTube job {job_id} error: {e}")
         job_update(job_id, status="error", error=str(e))
@@ -413,6 +443,22 @@ async def download_subtitle(job_id: str, lang_key: str, background_tasks: Backgr
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@app.get("/api/download-video/{job_id}")
+async def download_video(job_id: str, background_tasks: BackgroundTasks):
+    if job_id not in job_files:
+        raise HTTPException(404, "Job not found")
+    video_path = job_files[job_id].get("_video")
+    if not video_path:
+        raise HTTPException(404, "Video not available for this job")
+    if not os.path.exists(video_path):
+        raise HTTPException(404, "Video file missing from disk")
+    title = jobs.get(job_id, {}).get("filename", "video")
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', title).strip()[:80] or "video"
+    fname = f"{safe}.mp4"
+    background_tasks.add_task(cleanup_after_download, job_id, "_video", video_path)
+    return FileResponse(video_path, media_type="video/mp4", filename=fname)
 
 
 if __name__ == "__main__":

@@ -160,10 +160,39 @@
       <svg class="text-green-400" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
       </svg>
-      <h2 class="font-semibold text-green-400">Done! Download your subtitles</h2>
+      <h2 class="font-semibold text-green-400">Done! Download your files</h2>
     </div>
-    <p id="detected-lang" class="text-xs text-gray-500 mb-5"></p>
+    <p id="detected-lang" class="text-xs text-gray-500 mb-4"></p>
+
+    <!-- Subtitle downloads -->
+    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Subtitles</p>
     <div id="dl-buttons" class="space-y-2"></div>
+
+    <!-- Video download (YouTube only) -->
+    <div id="video-section" class="hidden mt-5 pt-4 border-t border-gray-800">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Video</p>
+      <!-- Preparing spinner -->
+      <div id="video-preparing" class="flex items-center gap-2 text-sm text-gray-400">
+        <svg class="animate-spin shrink-0" width="16" height="16" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+        Downloading video in background…
+      </div>
+      <!-- Download button -->
+      <a id="video-dl-btn" class="hidden flex items-center gap-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl px-4 py-3 transition-colors group cursor-pointer">
+        <svg class="text-purple-400 shrink-0 group-hover:text-purple-300" width="18" height="18" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>
+        <span class="font-medium text-sm">Download Video</span>
+        <span class="ml-auto text-xs text-gray-500">.mp4</span>
+      </a>
+      <!-- Error notice -->
+      <p id="video-error-msg" class="hidden text-xs text-amber-500">
+        Video download failed — subtitles above are still available.
+      </p>
+    </div>
+
     <button id="new-btn" class="mt-5 text-sm text-indigo-400 hover:text-indigo-300 underline">
       Process another video →
     </button>
@@ -185,6 +214,7 @@ let selected = new Set(['English', 'Korean']);
 let jobId = null;
 let poll = null;
 let isYoutube = false;
+let resultsShown = false;
 
 const STATUS_ORDER = ['downloading', 'extracting_audio', 'loading_model', 'transcribing', 'translating'];
 const STATUS_LABEL = {
@@ -322,8 +352,17 @@ async function checkStatus() {
     if (!res.ok) return;
     const data = await res.json();
     updateProgress(data);
-    if (data.status === 'completed') { clearInterval(poll); showResults(data); }
-    else if (data.status === 'error') { clearInterval(poll); showError(data.error || 'Unknown error'); setGenBtn(true, 'Generate Subtitles'); }
+
+    if (data.status === 'completed') {
+      if (!resultsShown) { resultsShown = true; showResults(data); }
+      else { updateVideoSection(data); }
+      // For YouTube jobs keep polling until video_ready is resolved
+      if (!isYoutube || data.video_ready !== undefined) clearInterval(poll);
+    } else if (data.status === 'error') {
+      clearInterval(poll);
+      showError(data.error || 'Unknown error');
+      setGenBtn(true, 'Generate Subtitles');
+    }
   } catch (_) {}
 }
 
@@ -378,6 +417,35 @@ function showResults(data) {
       <span class="ml-auto text-xs text-gray-500">.srt</span>`;
     container.appendChild(a);
   });
+
+  // Show video section for YouTube jobs
+  if (isYoutube) {
+    document.getElementById('video-section').classList.remove('hidden');
+    updateVideoSection(data);
+  }
+}
+
+function updateVideoSection(data) {
+  const preparing = document.getElementById('video-preparing');
+  const dlBtn     = document.getElementById('video-dl-btn');
+  const errMsg    = document.getElementById('video-error-msg');
+
+  if (data.video_ready === true) {
+    preparing.classList.add('hidden');
+    errMsg.classList.add('hidden');
+    dlBtn.classList.remove('hidden');
+    dlBtn.href = `/api/download-video/${jobId}`;
+    dlBtn.download = '';
+  } else if (data.video_ready === false) {
+    preparing.classList.add('hidden');
+    dlBtn.classList.add('hidden');
+    errMsg.classList.remove('hidden');
+  } else {
+    // Still downloading — spinner stays visible
+    preparing.classList.remove('hidden');
+    dlBtn.classList.add('hidden');
+    errMsg.classList.add('hidden');
+  }
 }
 
 function showError(msg) {
@@ -387,8 +455,9 @@ function showError(msg) {
 }
 
 function reset() {
-  file = null; jobId = null; isYoutube = false;
+  file = null; jobId = null; isYoutube = false; resultsShown = false;
   clearInterval(poll);
+  document.getElementById('video-section').classList.add('hidden');
   document.getElementById('dz-idle').classList.remove('hidden');
   const c = document.getElementById('dz-chosen');
   c.classList.add('hidden'); c.classList.remove('flex');

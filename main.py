@@ -1,14 +1,15 @@
 import os
 import uuid
-import tempfile
+import shutil
 import subprocess
 import threading
 import re
 import logging
 from pathlib import Path
+
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
 import whisper
 from deep_translator import GoogleTranslator
@@ -18,10 +19,18 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Subtitle Generator")
 
+TEMP_BASE = Path("/Volumes/Samsung T7/Agent/Subtitle Generator/Temp")
+
 jobs: dict = {}
 job_files: dict = {}
 loaded_models: dict = {}
 model_lock = threading.Lock()
+
+
+def make_job_dir(job_id: str) -> str:
+    job_dir = TEMP_BASE / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    return str(job_dir)
 
 LANGUAGES = {
     "Arabic": "ar",
@@ -137,6 +146,24 @@ def job_update(job_id: str, **kwargs):
     jobs[job_id].update(kwargs)
 
 
+def cleanup_after_download(job_id: str, lang_key: str, file_path: str):
+    """Delete the served file, then remove the temp dir when all files are gone."""
+    try:
+        os.unlink(file_path)
+    except OSError:
+        pass
+    if job_id not in job_files:
+        return
+    job_files[job_id].pop(lang_key, None)
+    remaining = [k for k in job_files[job_id] if not k.startswith("_")]
+    if not remaining:
+        output_dir = job_files[job_id].get("_dir")
+        if output_dir:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        job_files.pop(job_id, None)
+        jobs.pop(job_id, None)
+
+
 def _extract_audio(input_path: str, output_dir: str) -> str:
     """Convert any video/audio file to 16kHz mono WAV. Returns wav path."""
     audio_path = os.path.join(output_dir, "audio.wav")
@@ -204,6 +231,7 @@ def _transcribe_and_translate(job_id: str, audio_path: str, output_dir: str,
             f.write(translated)
         output_files[lang_name] = t_path
 
+    output_files["_dir"] = output_dir
     job_files[job_id] = output_files
     job_update(job_id, status="completed", progress=100, detected_language=detected_lang)
 
@@ -298,8 +326,9 @@ async def start_transcription(
     target_languages: str = Form("English,Korean"),
     model_size: str = Form("medium"),
 ):
+    job_id = str(uuid.uuid4())
+    output_dir = make_job_dir(job_id)
     suffix = Path(file.filename or "video.mp4").suffix or ".mp4"
-    output_dir = tempfile.mkdtemp(prefix="subtitle_")
     video_path = os.path.join(output_dir, f"video{suffix}")
 
     with open(video_path, "wb") as f:
@@ -310,8 +339,6 @@ async def start_transcription(
         l.strip() for l in target_languages.split(",")
         if l.strip() and l.strip() in LANGUAGES
     ]
-
-    job_id = str(uuid.uuid4())
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
@@ -340,8 +367,8 @@ async def transcribe_from_url(
         if l.strip() and l.strip() in LANGUAGES
     ]
 
-    output_dir = tempfile.mkdtemp(prefix="subtitle_yt_")
     job_id = str(uuid.uuid4())
+    output_dir = make_job_dir(job_id)
 
     jobs[job_id] = {
         "status": "queued",
@@ -367,7 +394,7 @@ async def get_status(job_id: str):
 
 
 @app.get("/api/download/{job_id}/{lang_key:path}")
-async def download_subtitle(job_id: str, lang_key: str):
+async def download_subtitle(job_id: str, lang_key: str, background_tasks: BackgroundTasks):
     if job_id not in job_files:
         raise HTTPException(404, "Job not found or not completed")
     files = job_files[job_id]
@@ -377,6 +404,7 @@ async def download_subtitle(job_id: str, lang_key: str):
     if not os.path.exists(file_path):
         raise HTTPException(404, "File missing from disk")
     fname = "subtitles_original.srt" if lang_key == "original" else f"subtitles_{LANGUAGES.get(lang_key, lang_key)}.srt"
+    background_tasks.add_task(cleanup_after_download, job_id, lang_key, file_path)
     return FileResponse(file_path, media_type="text/plain; charset=utf-8", filename=fname)
 
 

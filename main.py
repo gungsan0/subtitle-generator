@@ -395,17 +395,24 @@ async def get_status(job_id: str):
 
 @app.get("/api/download/{job_id}/{lang_key:path}")
 async def download_subtitle(job_id: str, lang_key: str, background_tasks: BackgroundTasks):
+    from fastapi.responses import Response as RawResponse
     if job_id not in job_files:
         raise HTTPException(404, "Job not found or not completed")
     files = job_files[job_id]
-    if lang_key not in files:
+    if lang_key.startswith("_") or lang_key not in files:
         raise HTTPException(404, f"Language '{lang_key}' not found")
     file_path = files[lang_key]
     if not os.path.exists(file_path):
         raise HTTPException(404, "File missing from disk")
     fname = "subtitles_original.srt" if lang_key == "original" else f"subtitles_{LANGUAGES.get(lang_key, lang_key)}.srt"
+    # Read into memory first so the background cleanup cannot race with streaming
+    content = Path(file_path).read_bytes()
     background_tasks.add_task(cleanup_after_download, job_id, lang_key, file_path)
-    return FileResponse(file_path, media_type="text/plain; charset=utf-8", filename=fname)
+    return RawResponse(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 if __name__ == "__main__":

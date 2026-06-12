@@ -1,0 +1,21 @@
+#!/bin/bash
+# Install Python dependencies for Subtitle Generator
+set -e
+
+PYTHON=$(command -v python3 || true)
+if [ -z "$PYTHON" ]; then
+  echo "python3 not found — skipping dependency install."
+  echo "Install Python 3, then run: pip3 install -r /usr/local/subtitle-generator/requirements.txt"
+  exit 0
+fi
+
+# Install as the logged-in user, not root, so pip puts packages where the user's python finds them
+CONSOLE_USER=$(stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  sudo -u "$CONSOLE_USER" "$PYTHON" -m pip install --user -q -r /usr/local/subtitle-generator/requirements.txt || true
+else
+  "$PYTHON" -m pip install -q -r /usr/local/subtitle-generator/requirements.txt || true
+fi
+
+chmod +x /usr/local/bin/subtitle-generator
+exit 0

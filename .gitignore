@@ -6,3 +6,5 @@ venv/
 .venv/
 *.log
 /tmp/
+packaging/*.pkg
+packaging/root/usr/local/subtitle-generator/

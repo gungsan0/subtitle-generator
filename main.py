@@ -19,7 +19,12 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Subtitle Generator")
 
-TEMP_BASE = Path("/Volumes/Samsung T7/Agent/Subtitle Generator/Temp")
+_DEFAULT_TEMP = "/Volumes/Samsung T7/Agent/Subtitle Generator/Temp"
+TEMP_BASE = Path(
+    os.environ.get("SUBTITLE_TEMP_DIR")
+    or (_DEFAULT_TEMP if os.path.isdir(os.path.dirname(_DEFAULT_TEMP)) else
+        str(Path.home() / ".subtitle-generator" / "temp"))
+)
 
 jobs: dict = {}
 job_files: dict = {}
